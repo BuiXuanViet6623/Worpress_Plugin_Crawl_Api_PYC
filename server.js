@@ -7,16 +7,16 @@ import pLimit from 'p-limit';
 
 const app = express();
 const BASE_URL = 'https://www.writerworking.net';
-const MAX_BOOKS_PER_PAGE = 15;
+const MAX_BOOKS_PER_PAGE = 20;
 
-// --- Axios instance với keep-alive ---
+// Axios instance với keep-alive
 const axiosInstance = axios.create({
     httpAgent: new http.Agent({ keepAlive: true }),
     httpsAgent: new https.Agent({ keepAlive: true }),
     timeout: 20000
 });
 
-// --- Crawl danh sách truyện ---
+// --- Crawl danh sách sách ---
 async function getBooks(pageNum = 1) {
     const url = `${BASE_URL}/ben/all/${pageNum}/`;
     const { data } = await axiosInstance.get(url);
@@ -30,14 +30,16 @@ async function getBooks(pageNum = 1) {
         const a = $(dl).find('dt a');
         const img = $(dl).find('a.cover img');
         const desc = $(dl).find('dd');
-        const bookIdMatch = a.attr('href')?.match(/\/kanshu\/(\d+)\//);
+
+        const bookUrl = a.attr('href')?.startsWith('http') ? a.attr('href') : BASE_URL + a.attr('href');
 
         books.push({
-            url: a.attr('href')?.startsWith('http') ? a.attr('href') : BASE_URL + a.attr('href'),
-            bookId: bookIdMatch ? bookIdMatch[1] : null,
             title: a.attr('title') || a.text(),
             cover_image: img.attr('data-src') || img.attr('src') || '',
             description: desc.text().trim(),
+            bookUrl, // chỉ dùng nội bộ crawl chi tiết, sẽ xóa trước khi trả JSON
+            author: '',
+            genres: [],
             chapters: []
         });
     });
@@ -68,18 +70,16 @@ async function getBookDetail(bookUrl) {
 }
 
 // --- Crawl danh sách chương ---
-async function getChapters(bookId, numChapters = 5) {
-    const url = `${BASE_URL}/xs/${bookId}/1/`;
-    const { data } = await axiosInstance.get(url);
+async function getChapters(bookUrl, numChapters = 5) {
+    const { data } = await axiosInstance.get(bookUrl);
     const $ = cheerio.load(data);
 
     const chapters = [];
-    $('div.all ul li').slice(0, numChapters).each((i, li) => {
-        const a = $(li).find('a');
-        const onclick = a.attr('onclick') || '';
-        const match = onclick.match(/location\.href='(.*?)'/);
-        const url = match ? BASE_URL + match[1] : null;
-        if (url) chapters.push({ url, title: a.text().trim(), content: '' });
+    $('div.all ul li a').slice(0, numChapters).each((i, a) => {
+        const href = $(a).attr('href');
+        if (!href) return;
+        const chapterUrl = href.startsWith('http') ? href : BASE_URL + href;
+        chapters.push({ chapterUrl });
     });
 
     return chapters;
@@ -102,41 +102,41 @@ async function getChapterContent(chapterUrl) {
     return { title, content };
 }
 
-// --- Concurrent Map với limit ---
+// --- Concurrent map ---
 async function concurrentMap(items, fn, limit = 5) {
     const limiter = pLimit(limit);
     return Promise.all(items.map(item => limiter(() => fn(item))));
 }
 
-// --- Crawl cực nhanh cho page / num_chapters tùy ý ---
+// --- Route crawl ---
 app.get('/crawl', async (req, res) => {
     const pageNum = parseInt(req.query.page) || 1;
     const numChapters = parseInt(req.query.num_chapters) || 5;
 
-    const CONCURRENT_BOOKS = 20;      // số book crawl song song
-    const CONCURRENT_CHAPTERS = 60;  // số chapter crawl song song mỗi book
+    const CONCURRENT_BOOKS = 20;
+    const CONCURRENT_CHAPTERS = 10;
 
     try {
         const books = await getBooks(pageNum);
 
         await concurrentMap(books, async (book) => {
-            if (!book.bookId) return;
-
-            // Crawl detail + chapters song song
+            // Crawl chi tiết + danh sách chương song song
             const [detail, chapters] = await Promise.all([
-                getBookDetail(book.url),
-                getChapters(book.bookId, numChapters)
+                getBookDetail(book.bookUrl),
+                getChapters(book.bookUrl, numChapters)
             ]);
 
             book.author = detail.author;
             book.genres = detail.genres ? [detail.genres] : [];
 
-            // Crawl tất cả chapter song song
+            // Crawl content từng chương
             book.chapters = await concurrentMap(chapters, async (ch) => {
-                const content = await getChapterContent(ch.url);
-                return { ...ch, title: content.title, content: content.content };
+                const content = await getChapterContent(ch.chapterUrl);
+                return { title: content.title, content: content.content };
             }, CONCURRENT_CHAPTERS);
 
+            delete book.bookUrl; // remove URL nội bộ
+            book.chapters.forEach(ch => delete ch.chapterUrl); // remove URL chương
         }, CONCURRENT_BOOKS);
 
         res.json({ results: books });
@@ -146,4 +146,3 @@ app.get('/crawl', async (req, res) => {
 });
 
 app.listen(3000, () => console.log('Server running on port 3000'));
-
