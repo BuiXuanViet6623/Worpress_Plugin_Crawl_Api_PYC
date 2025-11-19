@@ -7,7 +7,7 @@ import pLimit from 'p-limit';
 
 const app = express();
 const BASE_URL = 'https://www.writerworking.net';
-const MAX_BOOKS_PER_PAGE = 20;
+const MAX_BOOKS_PER_PAGE = 15;
 
 // --- Axios instance với keep-alive ---
 const axiosInstance = axios.create({
@@ -146,3 +146,4 @@ app.get('/crawl', async (req, res) => {
 });
 
 app.listen(3000, () => console.log('Server running on port 3000'));
+
