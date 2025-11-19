@@ -110,14 +110,14 @@ async function concurrentMap(items, fn, limit = 5) {
 // --- Route crawl tối ưu ---
 app.get('/crawl', async (req, res) => {
     const pageNum = parseInt(req.query.page) || 1;
-    const numBooks = parseInt(req.query.num_books) || 5;      // tối đa 5 sách mỗi page
-    const numChapters = parseInt(req.query.num_chapters) || 5; // tối đa 5 chương mỗi sách
+    const numChapters = parseInt(req.query.num_chapters) || 5; // số chương mỗi sách
 
-    const CONCURRENT_BOOKS = 5;       // concurrency thấp để Render không timeout
+    const CONCURRENT_BOOKS = 5;       
     const CONCURRENT_CHAPTERS = 5;
+    const MAX_BOOKS_PER_PAGE = 20; // giới hạn tối đa để không overload
 
     try {
-        const books = await getBooks(pageNum, numBooks);
+        const books = await getBooks(pageNum, MAX_BOOKS_PER_PAGE);
 
         await concurrentMap(books, async (book) => {
             // Crawl detail + chapters song song
@@ -135,8 +135,8 @@ app.get('/crawl', async (req, res) => {
                 return { title: content.title, content: content.content };
             }, CONCURRENT_CHAPTERS);
 
-            delete book.bookUrl;            // remove URL nội bộ
-            book.chapters.forEach(ch => delete ch.chapterUrl); // remove URL chương
+            delete book.bookUrl;            
+            book.chapters.forEach(ch => delete ch.chapterUrl); 
         }, CONCURRENT_BOOKS);
 
         res.json({ results: books });
@@ -147,4 +147,3 @@ app.get('/crawl', async (req, res) => {
 });
 
 app.listen(3000, () => console.log('Server running on port 3000'));
-
