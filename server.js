@@ -91,7 +91,7 @@ async function getChapterContent(chapterUrl) {
 }
 
 // --- Giới hạn số request đồng thời ---
-async function concurrentMap(items, fn, limit = 10) {
+async function concurrentMap(items, fn, limit = 20) {
     const results = [];
     let index = 0;
 
@@ -115,27 +115,30 @@ async function concurrentMap(items, fn, limit = 10) {
 app.get('/crawl', async (req, res) => {
     const pageNum = parseInt(req.query.page) || 1;
     const numChapters = parseInt(req.query.num_chapters) || 5;
-    const CONCURRENT_LIMIT = 10; // số request đồng thời (tăng để nhanh hơn nếu server chịu được)
+    const CONCURRENT_LIMIT = 30; // số request đồng thời (tăng để nhanh hơn nếu server chịu được)
 
     try {
         const books = await getBooks(pageNum);
 
         // Crawl chi tiết và chapters song song cho tất cả truyện
-        await concurrentMap(books, async (book) => {
-            if (!book.bookId) return;
+       await concurrentMap(books, async (book) => {
+    if (!book.bookId) return;
 
-            const detail = await getBookDetail(book.url);
-            book.author = detail.author;
-            book.genres = detail.genres ? [detail.genres] : [];
+    // Crawl detail và chapters song song
+    const [detail, chapters] = await Promise.all([
+        getBookDetail(book.url),
+        getChapters(book.bookId, numChapters)
+    ]);
 
-            const chapters = await getChapters(book.bookId, numChapters);
+    book.author = detail.author;
+    book.genres = detail.genres ? [detail.genres] : [];
+    
+    book.chapters = await concurrentMap(chapters, async (ch) => {
+        const content = await getChapterContent(ch.url);
+        return { ...ch, title: content.title, content: content.content };
+    }, CONCURRENT_LIMIT);
+}, CONCURRENT_LIMIT);
 
-            // Crawl tất cả chương song song
-            book.chapters = await concurrentMap(chapters, async (ch) => {
-                const content = await getChapterContent(ch.url);
-                return { ...ch, title: content.title, content: content.content };
-            }, CONCURRENT_LIMIT);
-        }, CONCURRENT_LIMIT);
 
         res.json({ results: books });
     } catch (e) {
