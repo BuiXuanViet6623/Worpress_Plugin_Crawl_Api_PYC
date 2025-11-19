@@ -16,7 +16,7 @@ const axiosInstance = axios.create({
 });
 
 // --- Crawl danh sách sách ---
-async function getBooks(pageNum = 1, maxBooks = 5) {
+async function getBooks(pageNum = 1, maxBooks = 20) {
     const url = `${BASE_URL}/ben/all/${pageNum}/`;
     const { data } = await axiosInstance.get(url);
     const $ = cheerio.load(data);
@@ -147,3 +147,4 @@ app.get('/crawl', async (req, res) => {
 });
 
 app.listen(3000, () => console.log('Server running on port 3000'));
+
